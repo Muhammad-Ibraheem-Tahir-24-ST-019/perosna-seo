@@ -1,0 +1,745 @@
+// IndexPilot - URL Discovery & Indexing Platform
+//
+// Design notes that matter when reading this schema:
+//  * URL state lives on THREE independent dimensions (validation / processing /
+//    verification). A provider submission never writes an "indexed" value.
+//  * Credits are an append-only ledger. CreditWallet.cachedBalance is a
+//    performance cache that is only ever moved inside the same transaction that
+//    writes the ledger row, and it is reconcilable from CreditTransaction.
+//  * Deduplication is scoped to a project, so two customers (or two projects)
+//    may legitimately submit the same public URL.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  USER
+  AGENCY
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING_VERIFICATION
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum ValidationStatus {
+  RECEIVED
+  VALIDATING
+  VALID
+  INVALID
+  BLOCKED
+}
+
+enum ProcessingStatus {
+  NOT_QUEUED
+  QUEUED
+  PROCESSING
+  DISCOVERY_ATTEMPTED
+  CRAWL_DETECTED
+  FAILED
+  CANCELLED
+}
+
+enum VerificationStatus {
+  NOT_CHECKED
+  PENDING
+  INDEXED_CONFIRMED
+  NOT_CONFIRMED_INDEXED
+  ERROR
+}
+
+enum AttemptStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  SKIPPED
+}
+
+enum IndexCheckStatus {
+  INDEXED_CONFIRMED
+  NOT_CONFIRMED_INDEXED
+  ERROR
+}
+
+enum SearchEngine {
+  GOOGLE
+  BING
+  YANDEX
+  NAVER
+  SEZNAM
+  OTHER
+}
+
+enum CreditTransactionType {
+  PURCHASE
+  SUBMISSION_DEBIT
+  REFUND
+  ADMIN_ADJUSTMENT
+  BONUS
+  REVERSAL
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+  CANCELLED
+}
+
+enum ReportStatus {
+  QUEUED
+  GENERATING
+  READY
+  FAILED
+  EXPIRED
+}
+
+enum ReportFormat {
+  CSV
+}
+
+enum JobStatus {
+  QUEUED
+  ACTIVE
+  COMPLETED
+  FAILED
+}
+
+enum ProviderHealth {
+  UNKNOWN
+  HEALTHY
+  DEGRADED
+  UNHEALTHY
+  DISABLED
+}
+
+enum ProviderType {
+  DISCOVERY
+  SEARCH_ENGINE_SUBMISSION
+  INDEX_CHECK
+}
+
+enum SubmissionSource {
+  DASHBOARD
+  UPLOAD
+  API
+}
+
+/// Which shared engine backs a public tool page. Several tool pages map onto one
+/// engine on purpose: the SEO plan is one implementation behind many keyword
+/// landing pages, not many codebases.
+enum ToolEngine {
+  ROBOTS_TXT
+  PAGE_META
+  SITEMAP
+}
+
+enum ToolRunOutcome {
+  COMPLETED
+  FETCH_FAILED
+  BLOCKED
+  INVALID_INPUT
+  RATE_LIMITED
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+model User {
+  id              String     @id @default(cuid())
+  email           String     @unique
+  name            String?
+  passwordHash    String
+  role            UserRole   @default(USER)
+  status          UserStatus @default(ACTIVE)
+  emailVerifiedAt DateTime?
+  suspendedReason String?
+  lastLoginAt     DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  sessions           Session[]
+  projects           Project[]
+  urls               UrlRecord[]
+  wallet             CreditWallet?
+  payments           Payment[]
+  apiKeys            ApiKey[]
+  reports            Report[]
+  notifications      Notification[]
+  auditLogs          AuditLog[]          @relation("AuditActor")
+  submissionBatches  SubmissionBatch[]
+  verificationTokens VerificationToken[]
+  toolRuns           ToolRun[]
+  toolGrants         ToolAccessGrant[]   @relation("GrantHolder")
+  grantsIssued       ToolAccessGrant[]   @relation("GrantIssuer")
+  impersonatedSessions Session[]         @relation("ImpersonatedSessions")
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("users")
+}
+
+model Session {
+  id           String    @id @default(cuid())
+  userId       String
+  tokenHash    String    @unique
+  userAgent    String?
+  ipAddress    String?
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  lastSeenAt   DateTime  @default(now())
+  createdAt    DateTime  @default(now())
+
+  /// Set when an admin opened this session by impersonating `userId`. The
+  /// session then acts as that user, but every audit row still records who is
+  /// really behind the keyboard, and the UI must show a persistent banner.
+  impersonatedByUserId String?
+  impersonatedByEmail  String?
+
+  user           User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  impersonatedBy User? @relation("ImpersonatedSessions", fields: [impersonatedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([impersonatedByUserId])
+  @@map("sessions")
+}
+
+enum VerificationTokenPurpose {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+model VerificationToken {
+  id        String                   @id @default(cuid())
+  userId    String
+  purpose   VerificationTokenPurpose
+  tokenHash String                   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime                 @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+  @@map("verification_tokens")
+}
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  userId     String
+  name       String
+  keyPrefix  String    @unique
+  keyHash    String    @unique
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("api_keys")
+}
+
+// ---------------------------------------------------------------------------
+// Projects & URLs
+// ---------------------------------------------------------------------------
+
+model Project {
+  id          String        @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  status      ProjectStatus @default(ACTIVE)
+  archivedAt  DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  user    User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  urls    UrlRecord[]
+  reports Report[]
+  batches SubmissionBatch[]
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
+  @@map("projects")
+}
+
+model SubmissionBatch {
+  id                  String           @id @default(cuid())
+  userId              String
+  projectId           String
+  source              SubmissionSource @default(DASHBOARD)
+  /// Client supplied key that makes retried submissions return the first result.
+  idempotencyKey      String?
+  receivedCount       Int              @default(0)
+  acceptedCount       Int              @default(0)
+  duplicateCount      Int              @default(0)
+  invalidCount        Int              @default(0)
+  creditsCharged      Int              @default(0)
+  /// Cached response payload returned on idempotent replays.
+  resultSnapshot      Json?
+  fileName            String?
+  createdAt           DateTime         @default(now())
+
+  user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  urls    UrlRecord[]
+
+  @@unique([userId, idempotencyKey])
+  @@index([projectId, createdAt])
+  @@map("submission_batches")
+}
+
+model UrlRecord {
+  id                String             @id @default(cuid())
+  projectId         String
+  userId            String
+  batchId           String?
+  originalUrl       String
+  normalizedUrl     String
+  normalizedUrlHash String
+  scheme            String
+  hostname          String
+  path              String
+  validationStatus  ValidationStatus   @default(RECEIVED)
+  processingStatus  ProcessingStatus   @default(NOT_QUEUED)
+  verificationStatus VerificationStatus @default(NOT_CHECKED)
+  creditsCharged    Int                @default(0)
+  refundedAt        DateTime?
+  verificationRound Int                @default(0)
+  nextVerificationAt DateTime?
+  lastCheckedAt     DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  project     Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  batch       SubmissionBatch?      @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  validation  UrlValidationResult?
+  attempts    ProcessingAttempt[]
+  indexChecks IndexCheck[]
+
+  /// Dedup is per project on purpose: the same public URL may be submitted by
+  /// different customers, and by the same customer in a different campaign.
+  @@unique([projectId, normalizedUrlHash])
+  @@index([userId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([projectId, validationStatus])
+  @@index([projectId, processingStatus])
+  @@index([projectId, verificationStatus])
+  @@index([hostname])
+  @@index([nextVerificationAt])
+  @@map("url_records")
+}
+
+model UrlValidationResult {
+  id               String   @id @default(cuid())
+  urlId            String   @unique
+  httpStatus       Int?
+  finalUrl         String?
+  redirectCount    Int      @default(0)
+  redirectChain    Json?
+  robotsAllowed    Boolean?
+  robotsNote       String?
+  noindexDetected  Boolean?
+  noindexSource    String?
+  canonicalUrl     String?
+  canonicalMismatch Boolean @default(false)
+  title            String?
+  contentType      String?
+  contentLength    Int?
+  contentAccessible Boolean @default(false)
+  peerAddress      String?
+  durationMs       Int      @default(0)
+  warnings         Json?
+  errorCode        String?
+  errorMessage     String?
+  checkedAt        DateTime @default(now())
+
+  url UrlRecord @relation(fields: [urlId], references: [id], onDelete: Cascade)
+
+  @@map("url_validation_results")
+}
+
+model ProcessingAttempt {
+  id                String        @id @default(cuid())
+  urlId             String
+  providerId        String?
+  providerKey       String
+  attemptNumber     Int
+  status            AttemptStatus @default(PENDING)
+  startedAt         DateTime?
+  completedAt       DateTime?
+  providerReference String?
+  errorCode         String?
+  errorMessage      String?
+  metadata          Json?
+  createdAt         DateTime      @default(now())
+
+  url      UrlRecord               @relation(fields: [urlId], references: [id], onDelete: Cascade)
+  provider DiscoveryProviderConfig? @relation(fields: [providerId], references: [id], onDelete: SetNull)
+
+  /// Makes worker retries idempotent: one row per (url, attempt number).
+  @@unique([urlId, attemptNumber])
+  @@index([urlId, createdAt])
+  @@index([providerKey, status])
+  @@map("processing_attempts")
+}
+
+model IndexCheck {
+  id          String           @id @default(cuid())
+  urlId       String
+  engine      SearchEngine     @default(GOOGLE)
+  method      String
+  status      IndexCheckStatus
+  /// 0..1 - how much the method can actually prove. Never 1 for heuristics.
+  confidence  Float            @default(0)
+  limitations String?
+  round       Int              @default(1)
+  metadata    Json?
+  error       String?
+  checkedAt   DateTime         @default(now())
+
+  url UrlRecord @relation(fields: [urlId], references: [id], onDelete: Cascade)
+
+  @@unique([urlId, engine, round])
+  @@index([urlId, checkedAt])
+  @@map("index_checks")
+}
+
+// ---------------------------------------------------------------------------
+// Queues / jobs
+// ---------------------------------------------------------------------------
+
+model JobRecord {
+  id         String    @id @default(cuid())
+  queue      String
+  bullJobId  String
+  entityType String
+  entityId   String
+  status     JobStatus @default(QUEUED)
+  attempts   Int       @default(0)
+  error      String?
+  startedAt  DateTime?
+  finishedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([queue, bullJobId])
+  @@index([entityType, entityId])
+  @@index([status, queue])
+  @@map("job_records")
+}
+
+// ---------------------------------------------------------------------------
+// Credits & billing
+// ---------------------------------------------------------------------------
+
+model CreditWallet {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  /// Performance cache; always written in the same transaction as the ledger row.
+  cachedBalance Int      @default(0)
+  lifetimeSpent Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions CreditTransaction[]
+
+  @@map("credit_wallets")
+}
+
+model CreditTransaction {
+  id            String                @id @default(cuid())
+  walletId      String
+  amount        Int
+  type          CreditTransactionType
+  referenceType String?
+  referenceId   String?
+  description   String?
+  balanceAfter  Int?
+  createdAt     DateTime              @default(now())
+
+  wallet CreditWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  /// The idempotency backbone: a debit/refund for a given reference can only
+  /// ever be written once, so retries and duplicate webhooks cannot double up.
+  @@unique([walletId, type, referenceType, referenceId])
+  @@index([walletId, createdAt])
+  @@map("credit_transactions")
+}
+
+model CreditPackage {
+  id        String   @id @default(cuid())
+  name      String
+  credits   Int
+  priceCents Int
+  currency  String   @default("USD")
+  enabled   Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments Payment[]
+
+  @@map("credit_packages")
+}
+
+model Payment {
+  id                String        @id @default(cuid())
+  userId            String
+  packageId         String?
+  provider          String
+  providerPaymentId String?
+  status            PaymentStatus @default(PENDING)
+  amountCents       Int
+  currency          String        @default("USD")
+  credits           Int
+  checkoutUrl       String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  creditPackage CreditPackage? @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  events       PaymentEvent[]
+
+  @@unique([provider, providerPaymentId])
+  @@index([userId, createdAt])
+  @@map("payments")
+}
+
+model PaymentEvent {
+  id              String   @id @default(cuid())
+  paymentId       String?
+  provider        String
+  providerEventId String
+  type            String
+  payloadHash     String
+  metadata        Json?
+  processedAt     DateTime @default(now())
+
+  payment Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  /// Webhook idempotency: the same provider event is only ever applied once.
+  @@unique([provider, providerEventId])
+  @@map("payment_events")
+}
+
+// ---------------------------------------------------------------------------
+// Providers, reports, ops
+// ---------------------------------------------------------------------------
+
+model DiscoveryProviderConfig {
+  id                String         @id @default(cuid())
+  key               String         @unique
+  name              String
+  type              ProviderType   @default(DISCOVERY)
+  enabled           Boolean        @default(true)
+  priority          Int            @default(100)
+  /// AES-256-GCM envelope. Never returned to the browser.
+  encryptedConfig   String?
+  rateLimitPerMin   Int            @default(120)
+  dailyLimit        Int?
+  dailyUsed         Int            @default(0)
+  dailyWindowStart  DateTime?
+  healthStatus      ProviderHealth @default(UNKNOWN)
+  healthDetail      String?
+  lastHealthCheckAt DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  attempts ProcessingAttempt[]
+
+  @@index([enabled, priority])
+  @@map("discovery_provider_configs")
+}
+
+model Report {
+  id           String       @id @default(cuid())
+  userId       String
+  projectId    String?
+  status       ReportStatus @default(QUEUED)
+  format       ReportFormat @default(CSV)
+  filter       String       @default("all")
+  storageKey   String?
+  rowCount     Int?
+  errorMessage String?
+  expiresAt    DateTime?
+  createdAt    DateTime     @default(now())
+  completedAt  DateTime?
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("reports")
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  actorUserId  String?
+  actorEmail   String?
+  action       String
+  entityType   String
+  entityId     String?
+  reason       String?
+  metadata     Json?
+  ipAddress    String?
+  createdAt    DateTime @default(now())
+
+  actor User? @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([actorUserId, createdAt])
+  @@map("audit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Public SEO tools
+//
+// A tool page is content + a pointer at an engine. Admins create and edit these
+// rows, which is what makes "add a landing page for a new keyword" an operations
+// task rather than a deploy.
+// ---------------------------------------------------------------------------
+
+model ToolDefinition {
+  id              String     @id @default(cuid())
+  /// URL segment under /tools/, e.g. "robots-txt-tester".
+  slug            String     @unique
+  name            String
+  engine          ToolEngine
+  /// The page's H1. Distinct per slug so near-synonym pages are not duplicates.
+  headline        String
+  /// One or two sentences under the H1, again distinct per slug.
+  intro           String
+  metaTitle       String
+  metaDescription String
+  enabled         Boolean    @default(true)
+  /// When true the tool refuses anonymous use and requires a signed-in account.
+  requiresAuth    Boolean    @default(false)
+  /// Shown in the tools index; hidden pages still work if you know the URL.
+  listed          Boolean    @default(true)
+  sortOrder       Int        @default(100)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  runs   ToolRun[]
+  grants ToolAccessGrant[]
+
+  @@index([enabled, sortOrder])
+  @@index([engine])
+  @@map("tool_definitions")
+}
+
+/// One row per tool completion. The brief asks to track completions rather than
+/// pageviews, because that is what says which tool is worth building on next.
+model ToolRun {
+  id         String         @id @default(cuid())
+  toolId     String?
+  /// Denormalised so runs survive a tool being renamed or deleted.
+  toolSlug   String
+  engine     ToolEngine
+  userId     String?
+  /// Salted hash, never a raw IP: enough to rate-limit and count uniques,
+  /// not enough to re-identify a visitor.
+  ipHash     String?
+  /// Host that was checked. Kept for abuse investigation and popularity stats.
+  targetHost String?
+  outcome    ToolRunOutcome @default(COMPLETED)
+  cached     Boolean        @default(false)
+  issueCount Int            @default(0)
+  durationMs Int            @default(0)
+  createdAt  DateTime       @default(now())
+
+  tool ToolDefinition? @relation(fields: [toolId], references: [id], onDelete: SetNull)
+  user User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([toolSlug, createdAt])
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  @@map("tool_runs")
+}
+
+/// Per-user override: grants access to a tool that requires auth, optionally
+/// with a higher quota than the account's tier would normally allow.
+model ToolAccessGrant {
+  id          String    @id @default(cuid())
+  userId      String
+  toolId      String
+  grantedById String?
+  /// Null means "use the default limit for this account".
+  hourlyLimit Int?
+  expiresAt   DateTime?
+  note        String?
+  createdAt   DateTime  @default(now())
+
+  user      User           @relation("GrantHolder", fields: [userId], references: [id], onDelete: Cascade)
+  grantedBy User?          @relation("GrantIssuer", fields: [grantedById], references: [id], onDelete: SetNull)
+  tool      ToolDefinition @relation(fields: [toolId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, toolId])
+  @@index([userId])
+  @@map("tool_access_grants")
+}
+
+model SystemSetting {
+  key            String   @id
+  value          Json?
+  encryptedValue String?
+  updatedAt      DateTime @updatedAt
+
+  @@map("system_settings")
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  body      String
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+model ApiUsageLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  apiKeyId   String?
+  method     String
+  path       String
+  statusCode Int
+  durationMs Int
+  createdAt  DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([apiKeyId, createdAt])
+  @@map("api_usage_logs")
+}

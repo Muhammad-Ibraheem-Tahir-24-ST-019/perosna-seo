@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Gesture Powers</title>
+<style>
+  :root{
+    --bg:#05070c; --panel:rgba(9,13,20,.68); --line:rgba(120,190,255,.16);
+    --txt:#dfe9f5; --dim:#8399b0; --cyan:#4fd8ff;
+    --pad:14px; --fs:12px;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--txt);
+    font:var(--fs)/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    overflow:hidden;-webkit-font-smoothing:antialiased}
+  #stage{position:fixed;inset:0}
+  #wrap{position:absolute;inset:0}
+  video{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+  canvas{position:absolute;left:0;top:0;display:block}
+
+  .panel{position:absolute;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;backdrop-filter:blur(10px);padding:9px 11px;
+    transition:opacity .2s}
+  body.nohud .panel,body.nohud #rec{opacity:0;pointer-events:none}
+
+  /* ---------------- power core ---------------- */
+  #hud{top:var(--pad);left:var(--pad);min-width:206px}
+  #hud h1{margin:0 0 7px;font-size:10px;letter-spacing:.2em;color:var(--cyan);
+    font-weight:600;display:flex;justify-content:space-between;align-items:center}
+  #loDots{display:flex;gap:4px}
+  #loDots i{width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.2)}
+  #loDots i.on{background:var(--cyan);box-shadow:0 0 6px var(--cyan)}
+  .row{display:flex;justify-content:space-between;gap:10px;margin:2px 0;font-size:11px}
+  .row b{color:#fff;font-weight:600}
+  .dim{color:var(--dim)}
+  .bar{height:4px;border-radius:3px;background:rgba(255,255,255,.07);
+    overflow:hidden;margin:2px 0 6px}
+  .bar i{display:block;height:100%;width:0%;border-radius:3px;transition:width .06s linear}
+  .bar.cy i{background:linear-gradient(90deg,#1d7fa8,#6fe8ff)}
+  .bar.gr i{background:linear-gradient(90deg,#2f7d1c,#8dfd5c)}
+  .bar.or i{background:linear-gradient(90deg,#a5560c,#ffb545)}
+
+  /* ---------------- gesture guide ---------------- */
+  #guide{bottom:var(--pad);left:var(--pad);max-width:min(390px,44vw)}
+  #guide h2{margin:0 0 6px;font-size:10px;letter-spacing:.2em;color:var(--dim);
+    font-weight:600;display:flex;gap:8px;align-items:baseline}
+  #loName{font-size:12px;letter-spacing:.14em;color:var(--cyan)}
+  #guideList{margin:0;padding:0;list-style:none}
+  #guideList li{display:flex;gap:7px;align-items:flex-start;margin:4px 0;font-size:11px}
+  #guideList li.always{opacity:.62}
+  #guideList li.always:first-of-type{margin-top:8px;padding-top:7px;
+    border-top:1px solid var(--line)}
+  #guideList kbd{flex:none;background:rgba(80,180,255,.1);border:1px solid var(--line);
+    border-radius:5px;padding:1px 6px;color:var(--cyan);font-size:10px;
+    min-width:104px;text-align:center;line-height:1.5}
+  #guideList span{padding-top:1px}
+
+  /* ---------------- keys ---------------- */
+  #keys{bottom:var(--pad);right:var(--pad);font-size:10px;color:var(--dim);
+    text-align:right;max-width:min(330px,36vw);line-height:1.8}
+  #keys b{color:var(--txt)}
+
+  /* ---------------- overlays ---------------- */
+  #rec{position:absolute;top:var(--pad);right:var(--pad);display:none;
+    align-items:center;gap:6px;color:#ff6b6b;font-size:11px;
+    background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:5px 9px}
+  #rec i{width:8px;height:8px;border-radius:50%;background:#ff3b3b;display:block;
+    animation:blink 1s steps(2,end) infinite}
+  @keyframes blink{50%{opacity:.15}}
+  #toast{position:absolute;top:46%;left:50%;transform:translate(-50%,-50%);
+    font-size:clamp(18px,3.4vw,30px);letter-spacing:.28em;font-weight:700;opacity:0;
+    pointer-events:none;text-shadow:0 0 26px currentColor;transition:opacity .25s;
+    white-space:nowrap}
+
+  /* ---------------- small windows ---------------- */
+  body.small{--pad:9px;--fs:11px}
+  body.small #hud{min-width:172px}
+  body.small #guideList kbd{min-width:88px;font-size:9px}
+  body.small #guide{max-width:min(300px,46vw)}
+  body.small #keys{display:none}
+  @media (max-height:520px){
+    #guide{display:none}
+  }
+
+  /* ---------------- boot ---------------- */
+  #boot{position:fixed;inset:0;display:grid;place-items:center;background:#05070c;
+    z-index:50;text-align:center;padding:24px}
+  #boot .inner{max-width:580px}
+  #boot h1{font-size:clamp(18px,3vw,23px);letter-spacing:.06em;margin:0 0 10px}
+  #boot p{color:var(--dim);margin:6px 0;font-size:12px}
+  #boot .err{color:#ff8080;white-space:pre-wrap;text-align:left;margin-top:14px;
+    border:1px solid rgba(255,90,90,.35);border-radius:8px;padding:10px;font-size:11px;
+    max-height:36vh;overflow:auto}
+  #start{margin-top:18px;padding:12px 28px;border-radius:999px;cursor:pointer;
+    border:1px solid rgba(90,200,255,.5);background:rgba(30,110,160,.25);color:#cfefff;
+    font:600 14px/1 ui-monospace,monospace;letter-spacing:.12em}
+  #start:hover{background:rgba(40,150,210,.35)}
+  #start[disabled]{opacity:.45;cursor:progress}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="wrap">
+    <video id="cam" playsinline muted autoplay></video>
+    <canvas id="fx"></canvas>
+
+    <div id="hud" class="panel">
+      <h1><span>POWER CORE</span><span id="loDots"></span></h1>
+      <div class="row"><span class="dim">left hand</span><b id="gL">-</b></div>
+      <div class="row"><span class="dim">right hand</span><b id="gR">-</b></div>
+      <div class="row"><span class="dim">status</span><b id="gF">-</b></div>
+      <div class="row"><span class="dim">charge</span><span class="dim" id="pC">0%</span></div>
+      <div class="bar cy"><i id="bC"></i></div>
+      <div class="row"><span class="dim">gamma</span><span class="dim" id="pH">0%</span></div>
+      <div class="bar gr"><i id="bH"></i></div>
+      <div class="row"><span class="dim">arcane</span><span class="dim" id="pM">0%</span></div>
+      <div class="bar or"><i id="bM"></i></div>
+      <div class="row"><span class="dim">fps</span><b id="fps">0</b></div>
+    </div>
+
+    <div id="guide" class="panel">
+      <h2>MODE <span id="loName">STARK</span></h2>
+      <ul id="guideList"></ul>
+    </div>
+
+    <div id="keys" class="panel">
+      <b>TAB</b> next mode &nbsp; <b>Q</b> mode wheel<br>
+      <b>1 2 3</b> loadout &nbsp; <b>4</b> AR &nbsp; <b>5</b> nano &nbsp; <b>6</b> pong &nbsp; <b>7</b> badminton<br>
+      <b>F</b> fit/fill &nbsp; <b>B</b> fullscreen &nbsp; <b>N</b> next model<br>
+      <b>S</b> photo &nbsp; <b>V</b> record &nbsp; <b>G</b> hologram<br>
+      <b>D</b> debug &nbsp; <b>H</b> hide UI &nbsp; <b>M</b> mute &nbsp; <b>ESC</b> reset
+    </div>
+
+    <div id="rec"><i></i> REC</div>
+    <div id="toast"></div>
+  </div>
+</div>
+
+<div id="boot">
+  <div class="inner">
+    <h1>GESTURE POWER SIMULATOR</h1>
+    <p>Webcam hand, face and body tracking. Powers, a holographic AR bench you
+       pull apart with your hands, a nanotech suit, and two games.
+       Nothing leaves your machine &mdash; all inference runs locally.</p>
+    <p class="dim" id="bootMsg">Press start, then allow the camera.</p>
+    <button id="start">START</button>
+    <p class="dim" style="margin-top:16px;font-size:11px">
+      Want just the holograms, running faster? The
+      <a href="./arlab.html" style="color:#4fd8ff">AR&nbsp;LAB</a>
+      is a separate app that loads only the hand tracker.
+    </p>
+    <div class="err" id="bootErr" style="display:none"></div>
+  </div>
+</div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

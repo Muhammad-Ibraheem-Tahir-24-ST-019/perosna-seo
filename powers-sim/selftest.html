@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>FX self-test</title>
+<style>
+  body{margin:0;background:#05070c;color:#9fb3c8;
+       font:12px ui-monospace,Consolas,monospace}
+  h2{color:#4fd8ff;font-size:11px;letter-spacing:.18em;margin:14px 0 6px;font-weight:600}
+  canvas{background:#000;border:1px solid rgba(120,190,255,.2);border-radius:8px;
+         display:block}
+  .grid{display:flex;flex-wrap:wrap;gap:14px;padding:14px}
+  .cell{display:flex;flex-direction:column}
+  #log{padding:10px 14px;white-space:pre-wrap;line-height:1.6;
+       border-bottom:1px solid rgba(120,190,255,.15)}
+  .ok{color:#8dfd5c} .bad{color:#ff7a7a} .hdr{color:#fff;font-weight:700}
+</style>
+</head>
+<body>
+<div id="log">running...</div>
+<div class="grid" id="grid"></div>
+
+<script type="module">
+/* Drives every effect against fake landmarks, so the drawing and gesture
+   code can be verified without a camera or a person in frame. */
+import {
+  FX, faceFrame, drawRepulsor, drawMandala, drawPortal, drawHelmet,
+  drawGamma, gammaGrade, FACE_OVAL, F, TAU,
+} from './fx.js';
+import { poseOf, fingersOf, makeHand, POSES, HandState, TUNING } from './hands.js';
+import { Compositor, Spill, Ash, grade } from './render.js';
+import {
+  drawBlue, drawRed, drawPurple, PurpleBeam, Slash,
+  drawVoid, drawShrine, drawDomainBurst,
+} from './jjk.js';
+import {
+  Bolt, drawMjolnir, drawGauntlet, drawChaos, drawShield, ShieldThrow,
+  drawEye, drawTimeRings, drawMindStone, EnergyBeam, boltPath,
+} from './marvel.js';
+import { drawArmor, Hologram, POSE, torsoVisible } from './stark.js';
+
+const log = [];
+const note = (msg, ok) => log.push((ok ? '[ok]   ' : '[FAIL] ') + msg);
+const head = (t) => log.push('\n── ' + t + ' ' + '─'.repeat(Math.max(0, 46 - t.length)));
+
+/* ---- a stand-in camera frame: a lit figure on a backdrop -------------- */
+function makePhoto(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  const bg = g.createLinearGradient(0, 0, 0, h);
+  bg.addColorStop(0, '#222831'); bg.addColorStop(1, '#0a0d12');
+  g.fillStyle = bg; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 40; i++) {
+    g.fillStyle = `rgba(90,120,160,${Math.random() * 0.06})`;
+    g.fillRect(Math.random() * w, Math.random() * h, 40, 3);
+  }
+  const cx = w / 2, cy = h * 0.42, rx = w * 0.13, ry = h * 0.2;
+  // shoulders
+  g.fillStyle = '#39414f';
+  g.beginPath();
+  g.moveTo(cx - rx * 3.0, h); g.lineTo(cx - rx * 1.9, cy + ry * 1.25);
+  g.lineTo(cx + rx * 1.9, cy + ry * 1.25); g.lineTo(cx + rx * 3.0, h);
+  g.closePath(); g.fill();
+  // head
+  const sk = g.createRadialGradient(cx - rx * 0.3, cy - ry * 0.4, 5, cx, cy, ry * 1.2);
+  sk.addColorStop(0, '#e8bb97'); sk.addColorStop(0.6, '#c08e6a'); sk.addColorStop(1, '#6d4a34');
+  g.fillStyle = sk;
+  g.beginPath(); g.ellipse(cx, cy, rx, ry, 0, 0, TAU); g.fill();
+  g.fillStyle = '#f4f4f4';
+  for (const s of [-1, 1]) {
+    g.beginPath(); g.ellipse(cx + s * rx * 0.42, cy - ry * 0.18, rx * 0.17, ry * 0.09, 0, 0, TAU); g.fill();
+  }
+  g.fillStyle = '#2b1d16';
+  for (const s of [-1, 1]) {
+    g.beginPath(); g.arc(cx + s * rx * 0.42, cy - ry * 0.18, rx * 0.07, 0, TAU); g.fill();
+  }
+  g.strokeStyle = '#7a4636'; g.lineWidth = w * 0.006;
+  g.beginPath(); g.moveTo(cx - rx * 0.3, cy + ry * 0.42);
+  g.quadraticCurveTo(cx, cy + ry * 0.55, cx + rx * 0.3, cy + ry * 0.42); g.stroke();
+  return { canvas: c, cx, cy, rx, ry, w, h };
+}
+
+/* ---- synthetic landmark sets ----------------------------------------- */
+function fakeFace(p) {
+  const L = new Array(478);
+  for (let i = 0; i < 478; i++) L[i] = { x: p.cx, y: p.cy, z: 0 };
+  FACE_OVAL.forEach((idx, k) => {
+    const a = (k / FACE_OVAL.length) * TAU;      // k=0 forehead, k=18 chin
+    L[idx] = { x: p.cx + Math.sin(a) * p.rx, y: p.cy - Math.cos(a) * p.ry, z: 0 };
+  });
+  L[F.L_EYE] = { x: p.cx - p.rx * 0.42, y: p.cy - p.ry * 0.18, z: 0 };
+  L[F.R_EYE] = { x: p.cx + p.rx * 0.42, y: p.cy - p.ry * 0.18, z: 0 };
+  L[F.BRIDGE] = { x: p.cx, y: p.cy - p.ry * 0.1, z: 0 };
+  L[F.NOSE] = { x: p.cx, y: p.cy + p.ry * 0.08, z: 0 };
+  return L;
+}
+
+function fakePose(p, armLift = 0.2) {
+  const P = new Array(33);
+  const put = (i, x, y) => { P[i] = { x, y, z: 0, visibility: 0.95 }; };
+  for (let i = 0; i < 33; i++) put(i, p.cx, p.cy);
+  const shY = p.cy + p.ry * 1.3, shX = p.rx * 1.85;
+  put(POSE.NOSE, p.cx, p.cy);
+  put(POSE.L_SH, p.cx - shX, shY);
+  put(POSE.R_SH, p.cx + shX, shY);
+  put(POSE.L_EL, p.cx - shX * 1.5, shY + p.ry * (1.1 - armLift));
+  put(POSE.R_EL, p.cx + shX * 1.5, shY + p.ry * (1.1 - armLift));
+  put(POSE.L_WR, p.cx - shX * 1.85, shY + p.ry * (2.0 - armLift * 3));
+  put(POSE.R_WR, p.cx + shX * 1.85, shY + p.ry * (2.0 - armLift * 3));
+  put(POSE.L_HIP, p.cx - shX * 0.7, shY + p.ry * 2.6);
+  put(POSE.R_HIP, p.cx + shX * 0.7, shY + p.ry * 2.6);
+  return P;
+}
+
+/* ---- cell harness ----------------------------------------------------- */
+function cell(title, draw, W = 380, H = 300) {
+  const wrap = document.createElement('div');
+  wrap.className = 'cell';
+  const h = document.createElement('h2'); h.textContent = title;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  wrap.append(h, c); document.getElementById('grid').append(wrap);
+  const g = c.getContext('2d');
+  const photo = makePhoto(W, H);
+  g.drawImage(photo.canvas, 0, 0);
+  try {
+    draw(g, photo, fakeFace(photo), W, H, c);
+    const px = g.getImageData(0, 0, W, H).data;
+    let sum = 0;
+    for (let i = 0; i < px.length; i += 4000) sum += px[i] + px[i + 1] + px[i + 2];
+    note(title + ' rendered', sum > 0);
+  } catch (e) {
+    note(title + ' threw: ' + e.message, false);
+    console.error(title, e);
+  }
+}
+
+const t = 1.7;
+
+/* ====================== rendering =========================== */
+head('rendering');
+
+cell('helmet: assembling', (g, p, L) => drawHelmet(g, faceFrame(L), 0.45, 0.8, t));
+cell('helmet: locked', (g, p, L) => drawHelmet(g, faceFrame(L), 1, 1.3, t));
+
+cell('body armour: assembling', (g, p, L, W, H) => {
+  const P = fakePose(p);
+  const r = drawArmor(g, P, 0.5, t);
+  if (!r) throw new Error('drawArmor returned null with a visible torso');
+});
+cell('body armour: complete', (g, p, L, W, H) => {
+  const P = fakePose(p);
+  const r = drawArmor(g, P, 1, t);
+  if (!r) throw new Error('drawArmor returned null with a visible torso');
+  drawHelmet(g, faceFrame(L), 1, 1.2, t);
+});
+
+cell('gamma: full', (g, p, L, W, H) => {
+  const fr = faceFrame(L);
+  gammaGrade(g, 1, W, H, t);
+  drawGamma(g, p.canvas, L, fr, 1, t, W, H);
+});
+
+cell('repulsor 35% / 100%', (g, p, L, W, H) => {
+  drawRepulsor(g, W * 0.26, H * 0.72, 44, 0.35, t);
+  drawRepulsor(g, W * 0.76, H * 0.72, 44, 1.0, t);
+});
+cell('mandala shield', (g, p, L, W, H) => drawMandala(g, W * 0.5, H * 0.66, 95, t, 1, 0.2));
+cell('sling-ring portal', (g, p, L, W, H) => drawPortal(g, W * 0.5, H * 0.5, 88, t, 1));
+
+/* ---- jujutsu ---- */
+head('cursed techniques');
+cell('Lapse: Blue', (g, p, L, W, H) => drawBlue(g, W * 0.5, H * 0.66, 70, 1, t));
+cell('Reversal: Red', (g, p, L, W, H) => drawRed(g, W * 0.5, H * 0.66, 70, 1, t));
+cell('Hollow Purple (merging)', (g, p, L, W, H) => drawPurple(g, W * 0.5, H * 0.6, 62, 0.55, t));
+cell('Hollow Purple (full)', (g, p, L, W, H) => drawPurple(g, W * 0.5, H * 0.6, 62, 1, t));
+cell('Hollow Purple beam', (g, p, L, W, H) => {
+  const b = new PurpleBeam(W * 0.18, H * 0.78, 0.8, -0.6, W * 2.2, H * 0.16);
+  for (let i = 0; i < 14; i++) b.update(1 / 60);
+  b.draw(g);
+});
+cell('Dismantle', (g, p, L, W, H) => {
+  for (let i = 0; i < 5; i++) {
+    const s = new Slash(W * (0.25 + i * 0.12), H * (0.3 + (i % 3) * 0.16),
+                        Math.cos(i), Math.sin(i * 1.7), W * 0.5, 9);
+    for (let k = 0; k < 6; k++) s.update(1 / 60);
+    s.draw(g);
+  }
+});
+cell('DOMAIN: Unlimited Void', (g, p, L, W, H) => {
+  drawVoid(g, W, H, 1, t, { x: p.cx, y: p.cy });
+});
+cell('DOMAIN: Malevolent Shrine', (g, p, L, W, H) => drawShrine(g, W, H, 1, t));
+cell('domain barrier burst', (g, p, L, W, H) => {
+  drawDomainBurst(g, W / 2, H / 2, W, 0.45, 'rgba(190,225,255,0.9)');
+});
+
+/* ---- marvel ---- */
+head('marvel');
+cell('Mjolnir + lightning', (g, p, L, W, H) => {
+  const b = new Bolt(W * 0.3, -20, W * 0.5, H * 0.55, '150,215,255', 3.2);
+  b.draw(g);
+  drawMjolnir(g, W * 0.5, H * 0.62, 0.2, 52, 1, t);
+});
+cell('Infinity Gauntlet', (g, p, L, W, H) => {
+  const hand = makeHand(POSES.OPEN, 95, W * 0.5, H * 0.86);
+  drawGauntlet(g, hand, 1, t, 1);
+});
+cell('THE SNAP: disintegration', (g, p, L, W, H) => {
+  const a = new Ash();
+  a.seed(p.cx - p.rx * 1.5, p.cy - p.ry * 1.2, p.rx * 3, p.ry * 3.4, 700,
+         { sweep: 0.6, up: -90 });
+  for (let i = 0; i < 55; i++) a.update(1 / 60);
+  grade(g, W, H, '#c8a06a', 0.3, 'multiply');
+  a.draw(g, p.canvas, W, H, W, H);
+  if (!a.flakes.length) throw new Error('all flakes expired too early');
+});
+cell('chaos magic', (g, p, L, W, H) => {
+  const trail = [];
+  for (let i = 0; i < 12; i++) trail.push({ x: W * 0.3 + i * 9, y: H * 0.8 - i * 4 });
+  drawChaos(g, W * 0.5, H * 0.66, 58, 1, t, trail);
+});
+cell('shield (held / thrown)', (g, p, L, W, H) => {
+  drawShield(g, W * 0.28, H * 0.68, 52, 0.4, 0.55, t);
+  const s = new ShieldThrow(W * 0.6, H * 0.5, 0.6, -0.3, 40, W, H);
+  for (let i = 0; i < 10; i++) s.update(1 / 60);
+  s.draw(g);
+});
+cell('Eye of Agamotto + time', (g, p, L, W, H) => {
+  drawTimeRings(g, W / 2, H / 2, Math.min(W, H) * 0.45, 1, t);
+  drawEye(g, W * 0.5, H * 0.74, 26, 1, t);
+});
+cell('mind stone', (g, p, L, W, H) => {
+  const fr = faceFrame(L);
+  drawMindStone(g, fr, 1, t);
+  const b = new EnergyBeam(fr.to(0, 0.72).x, fr.to(0, 0.72).y, 0, 1,
+                           H * 1.2, fr.w * 0.12, '255,210,60', 0.55);
+  for (let i = 0; i < 10; i++) b.update(1 / 60);
+  b.draw(g);
+});
+cell('hologram', (g, p, L, W, H) => {
+  const h = new Hologram();
+  h.open = 1; h.ry = 0.7; h.rx = -0.3;
+  h.draw(g, W * 0.5, H * 0.5, Math.min(W, H) * 0.2, t);
+});
+
+/* ---- compositor ---- */
+head('compositor');
+cell('NO bloom (raw layer)', (g, p, L, W, H) => {
+  drawRepulsor(g, W * 0.5, H * 0.6, 44, 1, t);
+});
+cell('WITH bloom (composited)', (g, p, L, W, H, canvasEl) => {
+  const comp = new Compositor();
+  const e = comp.begin(W, H);
+  drawRepulsor(e, W * 0.5, H * 0.6, 44, 1, t);
+  comp.composite(g, 1);
+  comp.drawGrain(g, W, H, 0.05);
+});
+cell('light spill onto the scene', (g, p, L, W, H) => {
+  const sp = new Spill();
+  sp.add(W * 0.3, H * 0.7, 220, '120,215,255', 1);
+  sp.add(W * 0.7, H * 0.7, 220, '255,90,40', 1);
+  sp.draw(g, W, H);
+});
+
+/* ====================== logic checks ======================== */
+head('geometry');
+{
+  const p = makePhoto(400, 300);
+  const fr = faceFrame(fakeFace(p));
+  note('faceFrame height ~ 2*ry (' + fr.h.toFixed(1) + ' vs ' + (2 * p.ry).toFixed(1) + ')',
+       Math.abs(fr.h - 2 * p.ry) < 2);
+  // 234/454 sit at ear level, not on the widest point, so a few percent under
+  note('faceFrame width ~ 2*rx (' + fr.w.toFixed(1) + ' vs ' + (2 * p.rx).toFixed(1) + ')',
+       Math.abs(fr.w - 2 * p.rx) / (2 * p.rx) < 0.05);
+  note('to(0,1) lands on the forehead', Math.abs(fr.to(0, 1).y - (p.cy - p.ry)) < 2);
+
+  const P = fakePose(p);
+  note('torsoVisible true with shoulders in frame', torsoVisible(P) === true);
+  const hidden = fakePose(p);
+  hidden[POSE.L_SH].visibility = 0.1;
+  note('torsoVisible false when a shoulder is lost', torsoVisible(hidden) === false);
+  note('drawArmor bails out on an invisible torso',
+       drawArmor(document.createElement('canvas').getContext('2d'), hidden, 1, 0) === null);
+}
+
+head('particles + actors');
+{
+  const fx = new FX();
+  fx.burst(0, 0, 50, '#fff', {});
+  const before = fx.parts.length;
+  for (let i = 0; i < 200; i++) fx.update(1 / 60);
+  note('particles expire (' + before + ' -> ' + fx.parts.length + ')', fx.parts.length === 0);
+  fx.addShake(30);
+  for (let i = 0; i < 120; i++) fx.update(1 / 60);
+  note('shake decays to rest (' + fx.shake.toFixed(3) + ')', fx.shake < 0.1);
+
+  const actors = [new Bolt(0, 0, 10, 10, '1,1,1', 2),
+                  new Slash(0, 0, 1, 0, 50, 5),
+                  new EnergyBeam(0, 0, 1, 0, 100, 5, '1,1,1', 0.5),
+                  new PurpleBeam(0, 0, 1, 0, 100, 5)];
+  let alive = actors.length;
+  for (let i = 0; i < 400 && alive; i++) {
+    alive = actors.filter((a) => a.update(1 / 60)).length;
+    actors.splice(0, actors.length, ...actors.filter((a) => a.life > 0));
+  }
+  note('every actor type expires and is collected', alive === 0);
+
+  const a = new Ash();
+  a.seed(0, 0, 100, 100, 200, {});
+  const seeded = a.flakes.length;
+  for (let i = 0; i < 400; i++) a.update(1 / 60);
+  note('ash flakes clear themselves (' + seeded + ' -> ' + a.flakes.length + ')',
+       a.flakes.length === 0);
+
+  const pts = boltPath(0, 0, 100, 100);
+  note('bolt path subdivides (' + pts.length + ' points)', pts.length > 30);
+}
+
+/* ====================== gestures ============================ */
+head('gesture recognition');
+{
+  for (const name of Object.keys(POSES)) {
+    const got = poseOf(makeHand(POSES[name]));
+    note('pose ' + name + ' -> ' + got, got === name);
+  }
+
+  let scaleOk = true, placeOk = true;
+  for (const name of Object.keys(POSES)) {
+    for (const s of [40, 90, 180, 320]) {
+      if (poseOf(makeHand(POSES[name], s, 500, 400)) !== name) scaleOk = false;
+    }
+    for (const [ox, oy] of [[0, 0], [900, 60], [120, 700], [1200, 650]]) {
+      if (poseOf(makeHand(POSES[name], 120, ox, oy)) !== name) placeOk = false;
+    }
+  }
+  note('poses hold from 40px to 320px hands', scaleOk);
+  note('poses hold anywhere in the frame', placeOk);
+
+  // the two thumb gestures must never be confused with each other
+  const pinch = fingersOf(makeHand(POSES.PINCH));
+  const snap = fingersOf(makeHand(POSES.SNAP));
+  note('pinch is thumb-to-INDEX (' + pinch.pinch + ')', pinch.pinch === true);
+  note('snap grip is thumb-to-MIDDLE, not a pinch (' + snap.snapGrip.toFixed(2) + ')',
+       snap.snapGrip < TUNING.snapHold && snap.pinch === false);
+
+  const openNoThumb = fingersOf(makeHand({ thumb: 0, index: 1, middle: 1, ring: 1, pinky: 1 }));
+  note('thumb tracked independently of the four fingers',
+       openNoThumb.count === 4 && openNoThumb.thumb === false);
+}
+
+head('gesture state machine');
+{
+  const h = new HandState();
+  const dt = 1 / 60;
+  for (let i = 0; i < 10; i++) h.update(makeHand(POSES.OPEN), dt);
+  note('settles on OPEN after 10 frames', h.gesture === 'OPEN');
+  h.update(makeHand(POSES.FIST), dt);                 // one glitched frame
+  note('one stray FIST frame does not fire', h.gesture === 'OPEN' && !h.takeClose());
+
+  let fires = 0;
+  for (let i = 0; i < 4; i++) { h.update(makeHand(POSES.FIST), dt); if (h.takeClose()) fires++; }
+  note('a real close fires exactly once (' + fires + ')', h.gesture === 'FIST' && fires === 1);
+  note('re-poll on a stale frame does not re-fire', h.takeClose() === false);
+  for (let i = 0; i < 30; i++) { h.update(makeHand(POSES.FIST), dt); if (h.takeClose()) fires++; }
+  note('holding a fist does not repeat-fire (' + fires + ' total)', fires === 1);
+
+  for (let i = 0; i < 40; i++) h.lost(dt);
+  note('hand release clears state', !h.active && h.gesture === 'NONE' && h.charge === 0);
+
+  // the snap: gripped, then flung apart
+  const s = new HandState();
+  for (let i = 0; i < 8; i++) s.update(makeHand(POSES.SNAP), dt);
+  note('snap grip does not fire on its own', s.takeSnap() === false);
+  let snaps = 0;
+  for (let i = 0; i < 6; i++) { s.update(makeHand(POSES.OPEN), dt); if (s.takeSnap()) snaps++; }
+  note('releasing the grip fires the snap exactly once (' + snaps + ')', snaps === 1);
+  for (let i = 0; i < 30; i++) { s.update(makeHand(POSES.OPEN), dt); if (s.takeSnap()) snaps++; }
+  note('an open hand does not keep snapping (' + snaps + ' total)', snaps === 1);
+
+  // velocity, for Dismantle and the shield throw
+  const v = new HandState();
+  for (let i = 0; i < 12; i++) v.update(makeHand(POSES.THREE, 100, 200 + i * 40, 400), dt);
+  note('fast sweep registers speed (' + Math.round(v.speed) + ' px/s)',
+       v.speed > TUNING.swipeSpeed * 0.5);
+  const still = new HandState();
+  for (let i = 0; i < 12; i++) still.update(makeHand(POSES.THREE, 100, 300, 400), dt);
+  note('a still hand registers no speed (' + still.speed.toFixed(0) + ')', still.speed < 30);
+
+  // palm tracking and aim
+  const h2 = new HandState();
+  for (let i = 0; i < 30; i++) h2.update(makeHand(POSES.OPEN, 100, 300, 500), dt);
+  note('palm centre tracks the hand (' + h2.palm.x.toFixed(0) + ',' + h2.palm.y.toFixed(0) + ')',
+       Math.abs(h2.palm.x - 304) < 25 && Math.abs(h2.palm.y - 456) < 25);
+  note('aim points away from the wrist (dy=' + h2.dir.y.toFixed(2) + ')', h2.dir.y < -0.9);
+  note('hand size is positive (' + h2.size.toFixed(0) + 'px)', h2.size > 50);
+}
+
+/* ---- report ---- */
+const bad = log.filter((l) => l.startsWith('[FAIL')).length;
+const checks = log.filter((l) => l.startsWith('[')).length;
+document.getElementById('log').innerHTML =
+  log.map((l) => l.startsWith('─') ? `<span class="hdr">${l}</span>`
+    : `<span class="${l.startsWith('[ok') ? 'ok' : 'bad'}">${l}</span>`).join('\n') +
+  `\n\n${bad === 0 ? '<span class="ok">ALL ' + checks + ' CHECKS PASSED</span>'
+                   : '<span class="bad">' + bad + ' OF ' + checks + ' FAILED</span>'}`;
+window.__selftest = { total: checks, failed: bad, log };
+</script>
+</body>
+</html>

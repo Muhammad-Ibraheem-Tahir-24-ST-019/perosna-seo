@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "powers",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "powers-sim/serve.py",
+        "8778"
+      ],
+      "port": 8778
+    }
+  ]
+}

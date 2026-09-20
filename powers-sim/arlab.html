@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>AR Lab</title>
+<style>
+  :root{
+    --bg:#04070c; --panel:rgba(9,14,22,.78); --line:rgba(120,190,255,.18);
+    --txt:#e2ecf7; --dim:#8399b0; --cyan:#4fd8ff; --ok:#8dfd5c;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--txt);
+    font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    overflow:hidden;-webkit-font-smoothing:antialiased}
+  video{position:fixed;width:1px;height:1px;opacity:0;pointer-events:none}
+  canvas#gl{position:fixed;left:0;top:0;display:block}
+
+  /* ------------------------------------------------ setup screen ------ */
+  #setup{position:fixed;inset:0;z-index:20;overflow-y:auto;
+    background:radial-gradient(1100px 620px at 50% 24%,#0c1724,#04070c 70%)}
+  #setup .wrap{max-width:940px;margin:0 auto;padding:34px 26px 60px}
+  h1{font-size:23px;letter-spacing:.14em;margin:0 0 6px;font-weight:700}
+  h1 span{color:var(--cyan)}
+  .lead{color:var(--dim);margin:0 0 4px;max-width:640px}
+  .note{color:#6f8298;font-size:11.5px;max-width:640px;margin:10px 0 22px;
+    border-left:2px solid rgba(120,190,255,.28);padding-left:11px}
+
+  .block{margin:0 0 22px}
+  .block > h2{font-size:10.5px;letter-spacing:.2em;color:var(--dim);
+    font-weight:600;margin:0 0 9px;display:flex;align-items:baseline;gap:9px}
+  .block > h2 em{font-style:normal;color:#5d7186;letter-spacing:0;font-size:11px}
+
+  .opts{display:flex;flex-wrap:wrap;gap:9px}
+  .opt{border:1px solid var(--line);background:rgba(18,30,44,.5);border-radius:9px;
+    padding:9px 14px;cursor:pointer;user-select:none;transition:.12s;min-width:104px}
+  .opt:hover{border-color:rgba(120,200,255,.5);background:rgba(26,46,68,.6)}
+  .opt.on{border-color:var(--cyan);background:rgba(30,92,130,.42);
+    box-shadow:0 0 0 1px rgba(79,216,255,.3) inset}
+  .opt b{display:block;font-size:13px}
+  .opt i{display:block;font-style:normal;color:var(--dim);font-size:11px;margin-top:2px}
+  .opt.on i{color:#a9c6dc}
+
+  .models{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:9px}
+  .m{border:1px solid var(--line);background:rgba(18,30,44,.5);border-radius:9px;
+    padding:10px 12px;cursor:pointer;transition:.12s}
+  .m:hover{border-color:rgba(120,200,255,.5)}
+  .m.on{border-color:var(--cyan);background:rgba(30,92,130,.42)}
+  .m b{display:block;font-size:12px}
+  .m i{display:block;font-style:normal;color:var(--dim);font-size:10.5px;margin-top:3px}
+  .m .p2{color:#ffb545}
+  #p2row{display:none}
+  body.two #p2row{display:block}
+
+  .toggles{display:flex;flex-wrap:wrap;gap:9px}
+  .tg{border:1px solid var(--line);background:rgba(18,30,44,.5);border-radius:9px;
+    padding:8px 13px;cursor:pointer;user-select:none;display:flex;align-items:center;gap:9px}
+  .tg:hover{border-color:rgba(120,200,255,.5)}
+  .tg .dot{width:9px;height:9px;border-radius:50%;background:#3a4a5c;flex:none}
+  .tg.on .dot{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .tg.on{border-color:rgba(141,253,92,.45)}
+
+  .go{display:flex;align-items:center;gap:16px;margin-top:26px;flex-wrap:wrap}
+  #launch{padding:14px 40px;border-radius:999px;cursor:pointer;
+    border:1px solid rgba(90,200,255,.55);background:rgba(30,110,160,.3);
+    color:#d6f2ff;font:700 14px/1 ui-monospace,monospace;letter-spacing:.16em}
+  #launch:hover{background:rgba(40,150,210,.42)}
+  #launch[disabled]{opacity:.5;cursor:progress}
+  #status{color:var(--dim)}
+  #err{display:none;color:#ff8f8f;white-space:pre-wrap;margin-top:16px;
+    border:1px solid rgba(255,90,90,.35);border-radius:9px;padding:12px;font-size:11.5px;
+    max-height:34vh;overflow:auto}
+  .budget{margin-top:14px;color:#6f8298;font-size:11.5px}
+  .budget b{color:var(--txt)}
+
+  /* ------------------------------------------------ in-app ------------ */
+  #toast{position:fixed;left:50%;top:44%;transform:translate(-50%,-50%);z-index:6;
+    font-size:26px;letter-spacing:.24em;font-weight:700;opacity:0;pointer-events:none;
+    text-shadow:0 0 24px currentColor;transition:opacity .25s;color:var(--cyan)}
+</style>
+</head>
+<body>
+
+<video id="cam" playsinline muted autoplay></video>
+<canvas id="gl"></canvas>
+<div id="toast"></div>
+
+<div id="setup">
+  <div class="wrap">
+    <h1>AR <span>LAB</span></h1>
+    <p class="lead">Holographic models you grab out of the air, turn, scale and
+       pull apart with your hands.</p>
+    <p class="note">This is a separate app from the powers sim on purpose. That one
+       runs three tracking models at once (hands, face, body), which eats frame
+       time and makes the hand gestures less certain. <b>This one loads only the
+       hand tracker</b>, so grabs are faster and steadier. Everything below picks
+       what gets loaded before anything starts.</p>
+
+    <div class="block">
+      <h2>PLAYERS <em>each player gets their own half of the screen and their own model</em></h2>
+      <div class="opts" id="players">
+        <div class="opt on" data-v="1"><b>1 PLAYER</b><i>full screen · 2 hands</i></div>
+        <div class="opt" data-v="2"><b>2 PLAYERS</b><i>split screen · 4 hands</i></div>
+      </div>
+    </div>
+
+    <div class="block">
+      <h2>QUALITY <em>lower means denser meshes cost less and the camera keeps up</em></h2>
+      <div class="opts" id="quality">
+        <div class="opt" data-v="low"><b>LOW</b><i>fastest · light mesh</i></div>
+        <div class="opt" data-v="medium"><b>MEDIUM</b><i>balanced</i></div>
+        <div class="opt on" data-v="high"><b>HIGH</b><i>dense mesh · sharp</i></div>
+      </div>
+    </div>
+
+    <div class="block">
+      <h2>CAMERA <em>a smaller frame tracks faster; a bigger one tracks further away</em></h2>
+      <div class="opts" id="camera">
+        <div class="opt" data-v="480"><b>640 × 480</b><i>fastest</i></div>
+        <div class="opt on" data-v="720"><b>1280 × 720</b><i>recommended</i></div>
+        <div class="opt" data-v="1080"><b>1920 × 1080</b><i>needs a good GPU</i></div>
+      </div>
+    </div>
+
+    <div class="block">
+      <h2>PLAYER 1 MODEL</h2>
+      <div class="models" id="m1"></div>
+    </div>
+
+    <div class="block" id="p2row">
+      <h2>PLAYER 2 MODEL</h2>
+      <div class="models" id="m2"></div>
+    </div>
+
+    <div class="block">
+      <h2>OPTIONS</h2>
+      <div class="toggles" id="toggles">
+        <div class="tg on" data-k="shading"><span class="dot"></span>Solid shading</div>
+        <div class="tg on" data-k="grid"><span class="dot"></span>Projector stage</div>
+        <div class="tg on" data-k="mirror"><span class="dot"></span>Mirror the camera</div>
+      </div>
+    </div>
+
+    <div class="go">
+      <button id="launch">LAUNCH</button>
+      <span id="status">Pick your options, then launch. The camera is asked for last.</span>
+    </div>
+    <div class="budget" id="budget"></div>
+    <div id="err"></div>
+  </div>
+</div>
+
+<script type="module">
+import { ARLab, SETTINGS } from './arlab.js';
+import { MODEL_NAMES, MODEL_BUILDERS, buildModel } from './models3d.js';
+
+const $ = (id) => document.getElementById(id);
+let lab = null;
+
+/* ---- build the model pickers ---- */
+function modelCards(hostId, player) {
+  const host = $(hostId);
+  host.innerHTML = MODEL_NAMES.map((n, i) => {
+    const m = buildModel(i, 1);
+    return `<div class="m${SETTINGS.model[player] === i ? ' on' : ''}" data-i="${i}">` +
+           `<b>${n}</b><i>${m.parts.length} parts · ${m.faceCount} faces</i></div>`;
+  }).join('');
+  host.addEventListener('click', (e) => {
+    const card = e.target.closest('.m');
+    if (!card) return;
+    SETTINGS.model[player] = parseInt(card.dataset.i, 10);
+    [...host.children].forEach((c) => c.classList.toggle('on', c === card));
+    updateBudget();
+  });
+}
+
+/* ---- option rows ---- */
+function optionRow(id, key, cast = (x) => x) {
+  const host = $(id);
+  host.addEventListener('click', (e) => {
+    const o = e.target.closest('.opt');
+    if (!o) return;
+    SETTINGS[key] = cast(o.dataset.v);
+    [...host.children].forEach((c) => c.classList.toggle('on', c === o));
+    document.body.classList.toggle('two', SETTINGS.players === 2);
+    updateBudget();
+  });
+}
+
+$('toggles').addEventListener('click', (e) => {
+  const t = e.target.closest('.tg');
+  if (!t) return;
+  const k = t.dataset.k;
+  SETTINGS[k] = !SETTINGS[k];
+  t.classList.toggle('on', SETTINGS[k]);
+  updateBudget();
+});
+
+function updateBudget() {
+  const meshQ = { low: 0.6, medium: 1.0, high: 1.35 }[SETTINGS.quality];
+  let faces = 0;
+  for (let p = 0; p < SETTINGS.players; p++) {
+    faces += buildModel(SETTINGS.model[p] ?? 0, meshQ).faceCount;
+  }
+  const est = faces > 2600 ? 'heavy' : faces > 1300 ? 'moderate' : 'light';
+  $('budget').innerHTML =
+    `Loading: <b>hand tracker only</b> (~8 MB, cached after the first run). ` +
+    `Drawing <b>${faces}</b> shaded faces per frame across ` +
+    `<b>${SETTINGS.players}</b> ${SETTINGS.players === 1 ? 'model' : 'models'} ` +
+    `— ${est}.` +
+    (SETTINGS.shading ? '' : ' Shading off: wireframe only, much cheaper.');
+}
+
+optionRow('players', 'players', (x) => parseInt(x, 10));
+optionRow('quality', 'quality');
+optionRow('camera', 'camera', (x) => parseInt(x, 10));
+modelCards('m1', 0);
+modelCards('m2', 1);
+updateBudget();
+
+/* ---- launch ---- */
+$('launch').addEventListener('click', async () => {
+  const btn = $('launch');
+  btn.disabled = true; btn.textContent = 'STARTING';
+  $('err').style.display = 'none';
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error(
+        'getUserMedia is unavailable.\n' +
+        'Browsers only expose the camera on a secure origin - serve this folder\n' +
+        'over http://localhost (run serve.py) instead of opening the file directly.');
+    }
+    lab = new ARLab($('cam'), $('gl'));
+    await lab.start((m) => { $('status').textContent = m; });
+    $('setup').style.display = 'none';
+    toast('AR LAB');
+  } catch (e) {
+    console.error(e);
+    $('err').style.display = 'block';
+    $('err').textContent = (e && (e.stack || e.message)) || String(e);
+    $('status').textContent = 'Could not start - details below.';
+    btn.disabled = false; btn.textContent = 'RETRY';
+  }
+});
+
+/* ---- keys ---- */
+let toastTimer = 0;
+function toast(t) {
+  const el = $('toast');
+  el.textContent = t; el.style.opacity = '1';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.style.opacity = '0'; }, 1100);
+}
+
+window.addEventListener('keydown', (e) => {
+  if (!lab || !lab.running) return;
+  const k = e.key.toLowerCase();
+  if (k === 'n') {
+    for (const b of lab.benches) b.setModel(b.modelIndex + 1);
+    toast(lab.benches[0].model.name);
+  } else if (k === 'r') {
+    for (const b of lab.benches) b.reset();
+    toast('RESET');
+  } else if (k === 'd') {
+    lab.debug = !lab.debug; toast(lab.debug ? 'DEBUG' : 'DEBUG OFF');
+  } else if (k === 'h') {
+    lab.hud = !lab.hud;
+    document.body.classList.toggle('nohud', !lab.hud);
+  } else if (k === 'f') {
+    if (!document.fullscreenElement) {
+      if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen();
+      }
+    } else if (document.exitFullscreen) document.exitFullscreen();
+  } else if (e.key === 'Escape') {
+    lab.stop(); lab = null;
+    $('setup').style.display = 'block';
+    $('launch').disabled = false;
+    $('launch').textContent = 'LAUNCH';
+    $('status').textContent = 'Stopped. Change anything and launch again.';
+  }
+});
+
+window.addEventListener('resize', () => { if (lab) lab.layout(); });
+window.addEventListener('fullscreenchange', () => setTimeout(() => { if (lab) lab.layout(); }, 60));
+
+window.__lab = () => lab;
+</script>
+</body>
+</html>
