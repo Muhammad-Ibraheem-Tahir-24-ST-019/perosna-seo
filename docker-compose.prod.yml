@@ -1,0 +1,100 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: indexpilot-postgres
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      POSTGRES_USER: indexpilot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: indexpilot
+    volumes:
+      - indexpilot_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U indexpilot -d indexpilot']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: indexpilot-redis
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - indexpilot_redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    container_name: indexpilot-minio
+    restart: unless-stopped
+    command: ['server', '/data', '--console-address', ':9001']
+    env_file: .env.production
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - indexpilot_miniodata:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    image: indexpilot:latest
+    container_name: indexpilot-api
+    command: ['node', 'apps/api/dist/index.js']
+    restart: unless-stopped
+    env_file: .env.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  worker:
+    image: indexpilot:latest
+    container_name: indexpilot-worker
+    command: ['node', 'apps/worker/dist/index.js']
+    restart: unless-stopped
+    env_file: .env.production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  web:
+    image: indexpilot:latest
+    container_name: indexpilot-web
+    command: ['pnpm', '--filter', '@indexpilot/web', 'start']
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      API_INTERNAL_URL: http://api:4000
+    depends_on:
+      - api
+    networks:
+      - default
+      - proxy
+
+volumes:
+  indexpilot_pgdata:
+  indexpilot_redisdata:
+  indexpilot_miniodata:
+
+networks:
+  proxy:
+    external: true
+    name: shared-network
