@@ -6,7 +6,6 @@ services:
     env_file: .env.production
     environment:
       POSTGRES_USER: indexpilot
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: indexpilot
     volumes:
       - indexpilot_pgdata:/var/lib/postgresql/data
@@ -35,9 +34,6 @@ services:
     restart: unless-stopped
     command: ['server', '/data', '--console-address', ':9001']
     env_file: .env.production
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     volumes:
       - indexpilot_miniodata:/data
     healthcheck:
