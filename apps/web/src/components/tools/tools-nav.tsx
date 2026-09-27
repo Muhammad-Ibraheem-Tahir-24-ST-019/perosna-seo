@@ -3,27 +3,30 @@
 import * as React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ChevronDown } from 'lucide-react';
-import { TOOL_CATALOG, TOOL_ENGINE_LABELS, type ToolEngineKey } from '@indexpilot/shared/client';
+import { ChevronDown, FileCode2, FileSearch, ShieldCheck, ArrowRight, Layers } from 'lucide-react';
+import { TOOL_CATALOG, type ToolEngineKey } from '@indexpilot/shared/client';
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/overlay';
 import { cn } from '@/lib/utils';
 
-/**
- * Cross-links every tool from every tool page.
- *
- * This is navigation first and internal linking second: a visitor who lands on
- * the sitemap checker from a search result should be one click from the other
- * tools, and the links give the thin keyword pages a reason to be connected.
- */
+const ENGINE_ICONS: Record<ToolEngineKey, React.ComponentType<{ className?: string }>> = {
+  ROBOTS_TXT: ShieldCheck,
+  PAGE_META: FileSearch,
+  SITEMAP: FileCode2,
+};
+
+const ENGINE_TITLES: Record<ToolEngineKey, string> = {
+  ROBOTS_TXT: 'Robots.txt & Crawl',
+  PAGE_META: 'Meta Tags & SERP',
+  SITEMAP: 'XML Sitemaps',
+};
+
 export function ToolsNav() {
   const pathname = usePathname();
+  const [open, setOpen] = React.useState(false);
 
   const grouped = React.useMemo(() => {
     const groups = new Map<ToolEngineKey, typeof TOOL_CATALOG>();
@@ -36,43 +39,83 @@ export function ToolsNav() {
     return [...groups.entries()];
   }, []);
 
-  const current = TOOL_CATALOG.find((tool) => pathname === `/tools/${tool.slug}`);
+  const isAnyToolActive = pathname.startsWith('/tools');
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className={cn(
+            'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            isAnyToolActive
+              ? 'bg-accent/80 text-foreground font-semibold'
+              : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+          )}
         >
-          {current ? current.name : 'Free tools'}
-          <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+          <Layers className="h-3.5 w-3.5 text-primary" aria-hidden />
+          <span>Tools</span>
+          <ChevronDown
+            className={cn(
+              'h-3.5 w-3.5 text-muted-foreground transition-transform duration-200',
+              open && 'rotate-180',
+            )}
+            aria-hidden
+          />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-64">
-        <DropdownMenuItem asChild>
-          <Link href="/tools" className="font-medium">
-            All tools
+      <DropdownMenuContent
+        align="start"
+        sideOffset={8}
+        className="w-[360px] sm:w-[640px] p-4 bg-popover text-popover-foreground border border-border shadow-2xl rounded-xl z-50"
+      >
+        <div className="grid gap-6 sm:grid-cols-3">
+          {grouped.map(([engine, tools]) => {
+            const Icon = ENGINE_ICONS[engine];
+            return (
+              <div key={engine} className="space-y-2">
+                <div className="flex items-center gap-2 pb-1 border-b border-border/50">
+                  <Icon className="h-4 w-4 text-primary shrink-0" aria-hidden />
+                  <p className="text-xs font-semibold text-foreground uppercase tracking-wider">
+                    {ENGINE_TITLES[engine]}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  {tools.map((tool) => {
+                    const isActive = pathname === `/tools/${tool.slug}`;
+                    return (
+                      <Link
+                        key={tool.slug}
+                        href={`/tools/${tool.slug}`}
+                        onClick={() => setOpen(false)}
+                        className={cn(
+                          'block rounded-md px-2.5 py-1.5 text-xs transition-colors',
+                          isActive
+                            ? 'bg-primary/10 text-primary font-semibold'
+                            : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                        )}
+                      >
+                        <p className="font-medium truncate">{tool.name}</p>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mt-4 pt-3 border-t flex items-center justify-between text-xs">
+          <span className="text-muted-foreground">All 13 technical SEO tools are 100% free.</span>
+          <Link
+            href="/tools"
+            onClick={() => setOpen(false)}
+            className="inline-flex items-center gap-1 font-semibold text-primary hover:underline"
+          >
+            Explore all tools
+            <ArrowRight className="h-3 w-3" aria-hidden />
           </Link>
-        </DropdownMenuItem>
-        {grouped.map(([engine, tools]) => (
-          <React.Fragment key={engine}>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              {TOOL_ENGINE_LABELS[engine]}
-            </DropdownMenuLabel>
-            {tools.map((tool) => (
-              <DropdownMenuItem key={tool.slug} asChild>
-                <Link
-                  href={`/tools/${tool.slug}`}
-                  className={cn(pathname === `/tools/${tool.slug}` && 'font-medium text-foreground')}
-                >
-                  {tool.name}
-                </Link>
-              </DropdownMenuItem>
-            ))}
-          </React.Fragment>
-        ))}
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
   );

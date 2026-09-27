@@ -12,12 +12,12 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    default: 'IndexPilot — URL Discovery & Indexing Platform',
-    template: '%s · IndexPilot',
+    default: 'SEO Micro-Tools — Free Robots.txt, Meta & Sitemap Checkers',
+    template: '%s · SEO Micro-Tools',
   },
   description:
-    'Submit URLs in bulk, validate them, run them through a modular discovery pipeline and monitor their search-engine status.',
-  robots: { index: false, follow: false },
+    'Free technical SEO micro-tools for marketers and developers. Test robots.txt directives, check title and description length by pixel width, inspect canonical tags, and validate XML sitemaps. 100% free with no login required.',
+  robots: { index: true, follow: true },
   icons: {
     icon: [{ url: '/icon.svg', type: 'image/svg+xml' }],
   },

@@ -4,7 +4,7 @@ const apiUrl = process.env.API_INTERNAL_URL ?? 'http://localhost:4000';
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  transpilePackages: ['@indexpilot/shared'],
+  transpilePackages: ['@indexpilot/shared', '@indexpilot/validation'],
   experimental: { optimizePackageImports: ['lucide-react', 'recharts'] },
   webpack(config) {
     // Workspace packages are TypeScript ESM: they import siblings as "./x.js",

@@ -17,12 +17,15 @@ const AUTH_PATHS = [
  * customer who happens to be signed in. Redirecting either way would break the
  * pages we are asking Google to rank.
  */
-const OPEN_PATHS = ['/tools', '/legal'];
+const OPEN_PATHS = ['/', '/tools', '/about', '/contact', '/privacy', '/terms', '/legal'];
 
 const SESSION_COOKIE = process.env.COOKIE_NAME ?? 'ip_session';
 
 function matches(pathname: string, paths: string[]): boolean {
-  return paths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+  return paths.some((path) => {
+    if (path === '/') return pathname === '/';
+    return pathname === path || pathname.startsWith(`${path}/`);
+  });
 }
 
 /**

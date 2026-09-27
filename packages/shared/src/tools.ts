@@ -34,7 +34,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     headline: 'Robots.txt Tester',
     intro:
       'Paste a domain to read its robots.txt, then test any URL path against the rules and see exactly which directive allows or blocks it.',
-    metaTitle: 'Robots.txt Tester - Test if a URL is blocked | IndexPilot',
+    metaTitle: 'Robots.txt Tester - Test if a URL is blocked | SEO Micro-Tools',
     metaDescription:
       'Free robots.txt tester. Fetch any site’s robots.txt, test a URL path against the rules, and see which directive blocks or allows it.',
     listed: true,
@@ -47,7 +47,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     headline: 'Robots.txt Checker',
     intro:
       'Check a site’s robots.txt for the mistakes that quietly stop Google crawling: a missing file, a stray Disallow: /, syntax errors and no sitemap directive.',
-    metaTitle: 'Robots.txt Checker - Find robots.txt errors | IndexPilot',
+    metaTitle: 'Robots.txt Checker - Find robots.txt errors | SEO Micro-Tools',
     metaDescription:
       'Check any robots.txt for errors. Finds blocked sites, syntax mistakes, missing sitemap directives and typos, with a plain-English fix for each.',
     listed: true,
@@ -60,7 +60,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     headline: 'Robots.txt Validator',
     intro:
       'Validate robots.txt syntax line by line. Every error and warning is reported with its line number and what to change.',
-    metaTitle: 'Robots.txt Validator - Line-by-line syntax check | IndexPilot',
+    metaTitle: 'Robots.txt Validator - Line-by-line syntax check | SEO Micro-Tools',
     metaDescription:
       'Validate robots.txt syntax online. Line-by-line errors, warnings and fixes for User-agent, Allow, Disallow, Sitemap and Crawl-delay directives.',
     listed: true,
@@ -75,7 +75,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     headline: 'Meta Tag Checker',
     intro:
       'Check a page’s title, meta description, canonical and robots tags in one pass — measured in pixels, the way Google actually truncates them.',
-    metaTitle: 'Meta Tag Checker - Title, description & canonical | IndexPilot',
+    metaTitle: 'Meta Tag Checker - Title, description & canonical | SEO Micro-Tools',
     metaDescription:
       'Free meta tag checker. Analyse title, meta description, canonical and robots tags for any URL, with pixel widths and a live Google preview.',
     listed: true,
@@ -88,7 +88,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     headline: 'Meta Title Checker',
     intro:
       'See whether a page’s meta title fits in Google’s results. Measured in pixels rather than characters, because that is what decides truncation.',
-    metaTitle: 'Meta Title Checker - Pixel length & SERP preview | IndexPilot',
+    metaTitle: 'Meta Title Checker - Pixel length & SERP preview | SEO Micro-Tools',
     metaDescription:
       'Check any page’s meta title length in pixels and characters, see if Google will cut it off, and preview how it appears in search results.',
     listed: true,
@@ -101,7 +101,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     headline: 'Meta Description Checker',
     intro:
       'Check a page’s meta description length, see whether Google will truncate it, and preview the snippet as it will appear in search.',
-    metaTitle: 'Meta Description Checker - Length & preview | IndexPilot',
+    metaTitle: 'Meta Description Checker - Length & preview | SEO Micro-Tools',
     metaDescription:
       'Free meta description checker. Measures pixel width and character count, flags missing or truncated descriptions, and previews the Google snippet.',
     listed: true,
@@ -114,7 +114,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     headline: 'Title Tag Checker',
     intro:
       'Read the <title> tag of any page and check its length, uniqueness signals and how it renders in the search results.',
-    metaTitle: 'Title Tag Checker - Check any page’s title tag | IndexPilot',
+    metaTitle: 'Title Tag Checker - Check any page’s title tag | SEO Micro-Tools',
     metaDescription:
       'Check the title tag of any URL. Reports the exact text, character count, pixel width, truncation risk and a live SERP preview.',
     listed: true,
@@ -127,7 +127,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     headline: 'SEO Title Checker',
     intro:
       'Check whether a page’s SEO title is the right length, is actually present, and matches what Google will show for it.',
-    metaTitle: 'SEO Title Checker - Length, preview & fixes | IndexPilot',
+    metaTitle: 'SEO Title Checker - Length, preview & fixes | SEO Micro-Tools',
     metaDescription:
       'Analyse any page’s SEO title: pixel width, character count, truncation, missing or duplicate tags, plus a Google results preview.',
     listed: true,
@@ -140,7 +140,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     headline: 'Canonical Tag Checker',
     intro:
       'Check a page’s rel="canonical" tag: whether it exists, whether it points at itself, another page, or another domain entirely.',
-    metaTitle: 'Canonical Tag Checker - Check rel=canonical | IndexPilot',
+    metaTitle: 'Canonical Tag Checker - Check rel=canonical | SEO Micro-Tools',
     metaDescription:
       'Free canonical tag checker. Finds rel="canonical" on any URL and reports whether it is self-referencing, cross-domain, duplicated or missing.',
     listed: true,
@@ -155,7 +155,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     headline: 'XML Sitemap Checker',
     intro:
       'Find a site’s sitemap, validate its XML, and check the URLs inside it for 404s, redirects and robots.txt blocks.',
-    metaTitle: 'Sitemap Checker - Validate XML & check every URL | IndexPilot',
+    metaTitle: 'Sitemap Checker - Validate XML & check every URL | SEO Micro-Tools',
     metaDescription:
       'Free sitemap checker. Auto-finds your sitemap, validates the XML structure, and tests the URLs inside it for 404s, redirects and robots blocks.',
     listed: true,
@@ -168,7 +168,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     headline: 'Sitemap Finder',
     intro:
       'Find the XML sitemap for any domain. Reads the Sitemap directive in robots.txt, then falls back to the conventional paths.',
-    metaTitle: 'Sitemap Finder - Find any site’s XML sitemap | IndexPilot',
+    metaTitle: 'Sitemap Finder - Find any site’s XML sitemap | SEO Micro-Tools',
     metaDescription:
       'Find the XML sitemap for any domain. Checks robots.txt and the common sitemap paths, then validates whatever it finds.',
     listed: true,
@@ -181,7 +181,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     headline: 'XML Sitemap Validator',
     intro:
       'Validate an XML sitemap against the sitemaps.org protocol: namespace, structure, entry limits, lastmod dates and priority values.',
-    metaTitle: 'XML Sitemap Validator - Check sitemap syntax | IndexPilot',
+    metaTitle: 'XML Sitemap Validator - Check sitemap syntax | SEO Micro-Tools',
     metaDescription:
       'Validate XML sitemap syntax online. Checks namespace, structure, 50,000-URL and 50MB limits, lastmod format and priority values.',
     listed: true,
@@ -194,7 +194,7 @@ export const TOOL_CATALOG: ToolCatalogEntry[] = [
     headline: 'XML Sitemap Checker',
     intro:
       'Check an XML sitemap end to end: is it valid XML, is it the right namespace, and do the URLs inside it actually resolve?',
-    metaTitle: 'XML Sitemap Checker - Validate & test URLs | IndexPilot',
+    metaTitle: 'XML Sitemap Checker - Validate & test URLs | SEO Micro-Tools',
     metaDescription:
       'Check any XML sitemap. Validates the file against the sitemaps.org spec and tests the URLs it lists for 404s, redirects and robots blocks.',
     listed: true,
