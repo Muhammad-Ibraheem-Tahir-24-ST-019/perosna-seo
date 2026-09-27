@@ -28,20 +28,6 @@ services:
       timeout: 5s
       retries: 20
 
-  minio:
-    image: quay.io/minio/minio:latest
-    container_name: indexpilot-minio
-    restart: unless-stopped
-    command: ['server', '/data', '--console-address', ':9001']
-    env_file: .env.production
-    volumes:
-      - indexpilot_miniodata:/data
-    healthcheck:
-      test: ['CMD', 'mc', 'ready', 'local']
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
   api:
     build: .
     image: indexpilot:latest
@@ -49,12 +35,12 @@ services:
     command: ['node', 'apps/api/dist/index.js']
     restart: unless-stopped
     env_file: .env.production
+    volumes:
+      - indexpilot_storage:/app/tmp/storage
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      minio:
         condition: service_healthy
 
   worker:
@@ -63,12 +49,12 @@ services:
     command: ['node', 'apps/worker/dist/index.js']
     restart: unless-stopped
     env_file: .env.production
+    volumes:
+      - indexpilot_storage:/app/tmp/storage
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      minio:
         condition: service_healthy
 
   web:
@@ -88,7 +74,7 @@ services:
 volumes:
   indexpilot_pgdata:
   indexpilot_redisdata:
-  indexpilot_miniodata:
+  indexpilot_storage:
 
 networks:
   proxy:
